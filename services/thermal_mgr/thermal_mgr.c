@@ -2,6 +2,7 @@
 #include "errors.h"
 #include "lm75bd.h"
 #include "console.h"
+#include "logging.h"
 
 #include <FreeRTOS.h>
 #include <os_task.h>
@@ -43,18 +44,54 @@ void initThermalSystemManager(lm75bd_config_t *config) {
 
 error_code_t thermalMgrSendEvent(thermal_mgr_event_t *event) {
   /* Send an event to the thermal manager queue */
+  if (thermalMgrQueueHandle == NULL) {
+    ERR_CODE_INVALID_STATE;
+  } else if (event == NULL) {
+    ERR_CODE_INVALID_ARG;
+  } 
 
+  if (xQueueSend(thermalMgrQueueHandle, event, 0) != pdTRUE) {
+    ERR_CODE_QUEUE_FULL;
+  }
+
+  xQueueSend(thermalMgrQueueHandle, event, 0);
   return ERR_CODE_SUCCESS;
 }
 
 void osHandlerLM75BD(void) {
-  /* Implement this function */
+  thermal_mgr_event_t interruptEvent;
+  interruptEvent.type = THERMAL_MGR_EVENT_OS_INTERRUPT;
+  thermalMgrSendEvent(&interruptEvent); // Sends interrupt event for MGR to see if too high or low
+
 }
 
 static void thermalMgr(void *pvParameters) {
   /* Implement this task */
   while (1) {
-    
+    thermal_mgr_event_t event;
+     if (xQueueReceive(thermalMgrQueueHandle, &event, portMAX_DELAY) == pdTRUE){
+      float curTemp;
+      float interruptTemp;
+      error_code_t errCode = readTempLM75BD(LM75BD_OBC_I2C_ADDR, &curTemp);
+      if (errCode != ERR_CODE_SUCCESS){
+        LOG_ERROR_CODE(errCode);
+        break;
+      }
+      switch (event.type) {
+        case THERMAL_MGR_EVENT_MEASURE_TEMP_CMD:
+          readTempLM75BD(LM75BD_OBC_I2C_ADDR, &curTemp);
+          addTemperatureTelemetry(curTemp);
+        case THERMAL_MGR_EVENT_OS_INTERRUPT:
+          readTempLM75BD(LM75BD_OBC_I2C_ADDR, &interruptTemp);
+          if (interruptTemp >= LM75BD_DEFAULT_OT_THRESH) {
+              overTemperatureDetected();
+          } else {
+              safeOperatingConditions();  
+          }
+        default:
+          LOG_ERROR_CODE(ERR_CODE_INVALID_QUEUE_MSG);
+      } 
+     }
   }
 }
 
