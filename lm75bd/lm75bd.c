@@ -26,6 +26,9 @@ error_code_t lm75bdInit(lm75bd_config_t *config) {
 }
 
 error_code_t readTempLM75BD(uint8_t devAddr, float *temp) {
+  if (temp == NULL){
+    return ERR_CODE_INVALID_ARG;
+  }
   error_code_t errCode; 
   uint8_t pointer_byte = 0x00;
   RETURN_IF_ERROR_CODE(i2cSendTo(devAddr, &pointer_byte, sizeof(pointer_byte)));
